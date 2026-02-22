@@ -51,3 +51,17 @@ Enter PID to Kill: 29996
 Process 29996 has been terminated.
 
 ```
+
+## ⚠️ 注意事项
+系统要求：适用于 Windows 10/11，需内置 PowerShell 5.0 及以上版本。
+权限说明：部分涉及进程关闭或系统清理的操作需要管理员权限，建议右键脚本选“以管理员身份运行”。
+
+## 🤝 贡献与反馈
+欢迎在 scripts/ 文件夹下添加你自己的实用脚本！
+Fork 本仓库。
+将脚本放入 scripts/ 目录。
+更新 README.md 的脚本索引表。
+提交 Pull Request。
+
+## ⚖️ 开源协议
+MIT License
