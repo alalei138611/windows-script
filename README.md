@@ -27,13 +27,27 @@
 ### **📸 运行预览**
 
 ```text
-【分析结果】
+============================================================
+          Windows Port Process Analyzer (Smart Kill)
+============================================================
+
+Enter Port Number: 8080
+
+Analyzing Port 8080...
 ------------------------------------------------------------
-程序名称 : java.exe
-进程 ID   : 9728
-内存占用 : 452.18 MB
+[FOUND] State: LISTENING | PID: 29996 | Name: java
+Memory : 199.05 MB
 ------------------------------------------------------------
-【项目地址】: D:\code\java\my-project\target\classes
-【启动类】  : com.example.MainApplication
-【JVM参数】 : -Xmx512m -agentlib:jdwp=... -Dfile.encoding=UTF-8
+Project Path: D:\code\java\my-project\target\classes
+Main Class  : com.example.Application
+JVM Args    : -Xms512m -Xmx1024m -Dfile.encoding=UTF-8 [CP]
 ------------------------------------------------------------
+
+[1] Kill Process (by PID) [2] Search Again [3] Exit
+Select Option (1/2/3): 1
+Enter PID to Kill: 29996
+成功: 已终止 PID 26156 (属于 PID 29996 子进程)的进程。
+成功: 已终止 PID 29996 (属于 PID 3944 子进程)的进程。
+Process 29996 has been terminated.
+
+```

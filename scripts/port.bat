@@ -1,48 +1,115 @@
+<# :
 @echo off
 setlocal enabledelayedexpansion
-title 端口进程深度分析 (含内存显示)
+title Windows Port Process Analyzer (De-duplicated)
 
-:: --- 自动提权 ---
+:: --- 1. Auto Admin Privilege Elevation ---
 >nul 2>&1 "%SYSTEMROOT%\system32\cacls.exe" "%SYSTEMROOT%\system32\config\system"
-if '%errorlevel%' NEQ '0' ( goto UACPrompt ) else ( goto gotAdmin )
+if '%errorlevel%' NEQ '0' (
+    goto UACPrompt
+) else ( goto gotAdmin )
 :UACPrompt
     echo Set UAC = CreateObject^("Shell.Application"^) > "%temp%\getadmin.vbs"
     echo UAC.ShellExecute "%~s0", "", "", "runas", 1 >> "%temp%\getadmin.vbs"
     "%temp%\getadmin.vbs" & exit /B
 :gotAdmin
+    if exist "%temp%\getadmin.vbs" ( del "%temp%\getadmin.vbs" )
 
 :menu
 cls
 echo ============================================================
-echo           Windows 端口进程溯源 (含内存监控)
+echo           Windows Port Process Analyzer (Stable)
 echo ============================================================
 echo.
-set /p port=请输入要查询的端口号: 
+set /p port=Enter Port Number: 
+
+if "%port%"=="" goto menu
 
 echo.
-set "found_pid="
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr :%port% ^| findstr LISTENING') do (set "found_pid=%%p")
+echo Analyzing Port %port%...
+echo ------------------------------------------------------------
 
-if "%found_pid%"=="" (
-    echo [提示] 端口 %port% 未被占用。
+:: --- 2. Pass Port and Current PID ---
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$code = (Get-Content '%~f0') -join \"`n\"; & ([scriptblock]::Create($code)) '%port%' '$PID'"
+
+echo.
+echo [1] Kill Process (by PID) [2] Search Again [3] Exit
+set /p opt=Select Option (1/2/3): 
+
+if "%opt%"=="1" (
+    set /p kpid=Enter PID to Kill: 
+    if not "!kpid!"=="" (
+        taskkill /F /PID !kpid! /T
+        echo Process !kpid! has been terminated.
+    )
     pause & goto menu
 )
-
-echo [分析结果]
-echo ------------------------------------------------------------
-:: 增加内存计算逻辑 (WS / 1MB)
-powershell -Command "$p = Get-Process -Id %found_pid% -ErrorAction SilentlyContinue; $cp = Get-CimInstance Win32_Process -Filter \"ProcessId = %found_pid%\"; if($p -and $cp){ $mem = [Math]::Round($p.WorkingSet64 / 1MB, 2); $cmd = $cp.CommandLine; $mainClass = $cmd.Split(' ')[-1]; $projectPath = if($cmd -match '-classpath\s+\"(.*?);'){ $matches[1] } else { '未知' }; $jvmArgs = $cmd -replace '-classpath\s+\".*?\"\s+', ' ' -replace ('\s+' + [regex]::Escape($mainClass) + '$'), ''; $jvmArgs = $jvmArgs.Trim(); Write-Host '程序名称 :' $p.ProcessName -ForegroundColor Cyan; Write-Host '进程 ID   :' $p.Id -ForegroundColor Cyan; Write-Host '内存占用 :' \"$mem MB\" -ForegroundColor Magenta; Write-Host '------------------------------------------------------------'; Write-Host '【项目地址】: ' -NoNewline; Write-Host $projectPath -ForegroundColor Green; Write-Host '【启动类】  : ' -NoNewline; Write-Host $mainClass -ForegroundColor Yellow; Write-Host '【JVM参数】 : ' -NoNewline; Write-Host $jvmArgs; } else { Write-Host '无法获取进程完整信息' -ForegroundColor Red }"
-echo ------------------------------------------------------------
-
-echo.
-echo [1] 终止进程 [2] 重新查询 [3] 退出
-set /p opt=请选择操作: 
-
-if "%opt%"=="1" ( 
-    taskkill /F /PID %found_pid% /T 
-    echo.
-    echo 已成功清理进程。 
-    pause & goto menu 
-)
 if "%opt%"=="2" goto menu
-exit
+if "%opt%"=="3" exit
+goto menu
+
+:: --- 3. PowerShell Code ---
+#>
+
+$port = $args[0]
+$myPid = $args[1]
+if (!$port) { return }
+
+$found = $false
+# Use a HashSet to track PIDs we've already displayed
+$displayedPids = New-Object System.Collections.Generic.HashSet[string]
+
+# Capture netstat output
+$netstat = netstat -ano | Select-String (":" + $port + "\s+")
+
+foreach ($line in $netstat) {
+    $fields = $line.ToString().Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+    if ($fields.Count -lt 5) { continue }
+    
+    $local = $fields[1]
+    $stat = $fields[3]
+    $foundPid = $fields[4]
+    
+    # 1. Precise match for local port binding
+    # 2. Ignore the script's own PID
+    # 3. Skip if this PID has already been displayed
+    if ($local -match (':' + $port + '$') -and $foundPid -ne '0' -and $foundPid -ne $myPid -and -not $displayedPids.Contains($foundPid)) {
+        
+        $pr = Get-Process -Id $foundPid -ErrorAction SilentlyContinue
+        $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $foundPid" -ErrorAction SilentlyContinue
+        
+        if ($pr) {
+            $found = $true
+            $null = $displayedPids.Add($foundPid) # Mark this PID as displayed
+            
+            $mem = [Math]::Round($pr.WorkingSet64/1MB, 2)
+            $cmd = if($cim){$cim.CommandLine}else{'Unknown'}
+            
+            # Default values
+            $path = 'Unknown'; $mc = 'Unknown'; $jvm = $cmd
+            
+            # Logic for Java processes (Spring Boot, etc.)
+            if ($cmd -match '-classpath\s+\"(.*?);') { 
+                $path = $Matches[1] 
+                $mc = $cmd.Split(' ')[-1]
+                # Strip the binary path and classpath to make JVM Args readable
+                $jvm = $cmd -replace '^".*?java\.exe"\s+', '' -replace '-classpath\s+\".*?\"\s+', '[CP] ' -replace ('\s+' + [System.Text.RegularExpressions.Regex]::Escape($mc) + '$'), ''
+            } elseif ($cmd -ne 'Unknown') {
+                $parts = $cmd.Split(' ')
+                $mc = $parts[0]
+            }
+            
+            Write-Host ("[FOUND] State: $stat | PID: $foundPid | Name: $($pr.ProcessName)") -ForegroundColor Cyan
+            Write-Host ("Memory : $mem MB") -ForegroundColor Magenta
+            Write-Host '------------------------------------------------------------'
+            Write-Host 'Project Path: ' -NoNewline; Write-Host $path -ForegroundColor Green
+            Write-Host 'Main Class  : ' -NoNewline; Write-Host $mc -ForegroundColor Yellow
+            Write-Host 'JVM Args    : ' -NoNewline; Write-Host $jvm.Trim()
+            Write-Host '------------------------------------------------------------'
+        }
+    }
+}
+
+if (-not $found) {
+    Write-Host 'No local process found using this port.' -ForegroundColor Gray
+}
